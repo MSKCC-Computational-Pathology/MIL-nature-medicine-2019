@@ -1,23 +1,24 @@
-import RNN_utils
-import torch
-import torch.nn as nn
-import torch.backends.cudnn as cudnn
+import os
+import sys
+import openslide
+from PIL import Image
 import numpy as np
 import random
 import argparse
+import torch
+import torch.nn as nn
+import torch.utils.data as data
+import torch.optim as optim
+import torch.backends.cudnn as cudnn
+import torch.nn.functional as F
 import torchvision.transforms as transforms
 import torchvision.models as models
-import os
-import math
-from PIL import Image
-import openslide
-import sys
 
 parser = argparse.ArgumentParser(description='MIL-nature-medicine-2019 RNN aggregator training script')
 parser.add_argument('--train_lib', type=str, default='', help='path to train MIL library binary')
 parser.add_argument('--val_lib', type=str, default='', help='path to validation MIL library binary. If present.')
 parser.add_argument('--output', type=str, default='.', help='name of output file')
-parser.add_argument('--batch_size', type=int, default=512, help='mini-batch size (default: 512)')
+parser.add_argument('--batch_size', type=int, default=128, help='mini-batch size (default: 128)')
 parser.add_argument('--nepochs', type=int, default=100, help='number of epochs')
 parser.add_argument('--workers', default=4, type=int, help='number of data loading workers (default: 4)')
 parser.add_argument('--s', default=10, type=int, help='how many top k tiles to consider (default: 10)')
@@ -64,7 +65,7 @@ def main():
     else:
         w = torch.Tensor([1-args.weights,args.weights])
         criterion = nn.CrossEntropyLoss(w).cuda()
-    optimizer = optimizer = optim.SGD(rnn.parameters(), 0.1, momentum=0.9, dampening=0, weight_decay=1e-4, nesterov=True)
+    optimizer = optim.SGD(rnn.parameters(), 0.1, momentum=0.9, dampening=0, weight_decay=1e-4, nesterov=True)
     cudnn.benchmark = True
 
     fconv = open(os.path.join(args.output, 'convergence.csv'), 'w')
@@ -88,7 +89,7 @@ def main():
                 'epoch': epoch+1,
                 'state_dict': rnn.state_dict()
             }
-            torch.save(obj, os.path.join(args.output,'checkpoint_best.pth'))
+            torch.save(obj, os.path.join(args.output,'rnn_checkpoint_best.pth'))
 
 def train_single(epoch, embedder, rnn, loader, criterion, optimizer):
     rnn.train()
@@ -99,7 +100,7 @@ def train_single(epoch, embedder, rnn, loader, criterion, optimizer):
     for i,(inputs,target) in enumerate(loader):
         print('Training - Epoch: [{}/{}]\tBatch: [{}/{}]'.format(epoch+1, args.nepochs, i+1, len(loader)))
 
-        batch_size = input[0].size(0)
+        batch_size = inputs[0].size(0)
         rnn.zero_grad()
 
         state = rnn.init_hidden(batch_size).cuda()
@@ -114,7 +115,7 @@ def train_single(epoch, embedder, rnn, loader, criterion, optimizer):
         optimizer.step()
         
         running_loss += loss.item()*target.size(0)
-        fps, fns = errors(output.detach(), target)
+        fps, fns = errors(output.detach(), target.cpu())
         running_fps += fps
         running_fns += fns
 
@@ -146,7 +147,7 @@ def test_single(epoch, embedder, rnn, loader, criterion):
             loss = criterion(output,target)
             
             running_loss += loss.item()*target.size(0)
-            fps, fns = errors(output.detach(), target)
+            fps, fns = errors(output.detach(), target.cpu())
             running_fps += fps
             running_fns += fns
             
@@ -222,7 +223,10 @@ class rnndata(data.Dataset):
 
         slides = []
         for i, name in enumerate(lib['slides']):
+            sys.stdout.write('Opening SVS headers: [{}/{}]\r'.format(i+1, len(lib['slides'])))
+            sys.stdout.flush()
             slides.append(openslide.OpenSlide(name))
+        print('')
         self.slides = slides
 
     def __getitem__(self,index):
@@ -233,7 +237,7 @@ class rnndata(data.Dataset):
             grid = random.sample(grid,len(grid))
 
         out = []
-        k = min(self.s, len(grid))
+        s = min(self.s, len(grid))
         for i in range(s):
             img = slide.read_region(grid[i], self.level, (self.size, self.size)).convert('RGB')
             if self.mult != 1:
