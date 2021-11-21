@@ -1,0 +1,15 @@
+name: MIL-nature-medicine-2019
+channels:
+  - pytorch
+  - anaconda
+  - conda-forge
+  - defaults
+dependencies:
+  - mkl=2020.2
+  - numpy=1.16.2
+  - openslide=3.4.1
+  - openslide-python=1.1.2
+  - pillow=8.4.0
+  - python=3.7.3
+  - pytorch=1.0.0
+  - torchvision=0.2.1
