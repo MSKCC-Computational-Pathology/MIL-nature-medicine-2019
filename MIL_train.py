@@ -24,6 +24,7 @@ parser.add_argument('--workers', default=4, type=int, help='number of data loadi
 parser.add_argument('--test_every', default=10, type=int, help='test on val every (default: 10)')
 parser.add_argument('--weights', default=0.5, type=float, help='unbalanced positive class weight (default: 0.5, balanced classes)')
 parser.add_argument('--k', default=1, type=int, help='top k tiles are assumed to be of the same class as the slide (default: 1, standard MIL)')
+parser.add_argument('--cuda', default=1, type=int, help='turn off cuda with 0')
 
 best_acc = 0
 def main():
@@ -33,13 +34,14 @@ def main():
     #cnn
     model = models.resnet34(True)
     model.fc = nn.Linear(model.fc.in_features, 2)
-    model.cuda()
+    model.cuda() if args.cuda else model.cpu()
 
     if args.weights==0.5:
-        criterion = nn.CrossEntropyLoss().cuda()
+        criterion = nn.CrossEntropyLoss().cuda() if args.cuda else nn.CrossEntropyLoss().cpu()
     else:
         w = torch.Tensor([1-args.weights,args.weights])
-        criterion = nn.CrossEntropyLoss(w).cuda()
+        criterion = nn.CrossEntropyLoss(w).cuda() if args.cuda else nn.CrossEntropyLoss(w).cpu()
+    criterion.type(torch.LongTensor)
     optimizer = optim.Adam(model.parameters(), lr=1e-4, weight_decay=1e-4)
 
     cudnn.benchmark = True
@@ -111,7 +113,7 @@ def inference(run, loader, model):
     with torch.no_grad():
         for i, input in enumerate(loader):
             print('Inference\tEpoch: [{}/{}]\tBatch: [{}/{}]'.format(run+1, args.nepochs, i+1, len(loader)))
-            input = input.cuda()
+            input = input.cuda() if args.cuda else input.cpu()
             output = F.softmax(model(input), dim=1)
             probs[i*args.batch_size:i*args.batch_size+input.size(0)] = output.detach()[:,1].clone()
     return probs.cpu().numpy()
@@ -120,8 +122,8 @@ def train(run, loader, model, criterion, optimizer):
     model.train()
     running_loss = 0.
     for i, (input, target) in enumerate(loader):
-        input = input.cuda()
-        target = target.cuda()
+        input = input.cuda() if args.cuda else input
+        target = target.cuda() if args.cuda else target
         output = model(input)
         loss = criterion(output, target)
         optimizer.zero_grad()

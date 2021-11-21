@@ -20,6 +20,7 @@ parser.add_argument('--output', type=str, default='.', help='name of output dire
 parser.add_argument('--model', type=str, default='', help='path to pretrained model')
 parser.add_argument('--batch_size', type=int, default=100, help='how many images to sample per slide (default: 100)')
 parser.add_argument('--workers', default=4, type=int, help='number of data loading workers (default: 4)')
+parser.add_argument('--cuda', default=1, type=int, help='turn off cuda with 0')
 
 def main():
     global args
@@ -30,7 +31,7 @@ def main():
     model.fc = nn.Linear(model.fc.in_features, 2)
     ch = torch.load(args.model)
     model.load_state_dict(ch['state_dict'])
-    model = model.cuda()
+    model = model.cuda() if args.cuda else model.cpu()
     cudnn.benchmark = True
 
     #normalization
@@ -60,7 +61,7 @@ def inference(loader, model):
     with torch.no_grad():
         for i, input in enumerate(loader):
             print('Batch: [{}/{}]'.format(i+1, len(loader)))
-            input = input.cuda()
+            input = input.cuda() if args.cuda else input.cpu()
             output = F.softmax(model(input), dim=1)
             probs[i*args.batch_size:i*args.batch_size+input.size(0)] = output.detach()[:,1].clone()
     return probs.cpu().numpy()
